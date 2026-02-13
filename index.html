@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RFID Card Top-Up Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    body {
+      background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen font-sans antialiased text-gray-800 dark:text-gray-200 transition-colors duration-300">
+
+  <!-- Header -->
+  <header class="bg-white dark:bg-gray-800 shadow-md">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+      <h1 class="text-2xl font-bold text-black-600 dark:text-white-400">
+        <i class="fas fa-rfid mr-2"></i> RFID Top-Up System
+      </h1>
+      <div class="text-right text-sm">
+        Team <b>batidao</b> <br> "make embedded fun"
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-4xl mx-auto px-6 py-10">
+    <!-- Current Balance Card -->
+    <div class="bg-gradient-to-r from-gray-800 to-gray-900 text-white rounded-2xl shadow-2xl p-8 mb-10 text-center transform transition-all hover:scale-105">
+      <h2 class="text-3xl font-bold mb-2">Current Balance</h2>
+      <p id="currentBalance" class="text-5xl font-extrabold">-- RWF</p>
+      <p id="currentUid" class="text-lg mt-2 opacity-90">Waiting for first scan...</p>
+      <p class="text-sm mt-4 opacity-80">Last updated: <span id="lastUpdate">--</span></p>
+    </div>
+
+    <!-- Top-Up Form -->
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 mb-10 transform transition-all hover:shadow-2xl">
+      <h2 class="text-3xl font-semibold mb-6 text-center text-gray-800 dark:text-gray-100">Top Up Your Card</h2>
+      <form id="topupForm" class="space-y-6">
+        <div>
+          <label for="uid" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Card UID</label>
+          <input type="text" id="uid" required placeholder="e.g. 56389904F3"
+            class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white transition"/>
+        </div>
+        <div>
+          <label for="amount" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Amount to Add (RWF)</label>
+          <input type="number" id="amount" min="100" step="100" required placeholder="500"
+            class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white transition"/>
+        </div>
+        <button type="submit"
+          class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-lg shadow-md transition transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-indigo-300">
+          <i class="fas fa-plus mr-2"></i> Top Up Now
+        </button>
+      </form>
+      <div id="feedback" class="mt-6 text-center hidden"></div>
+    </div>
+
+    <!-- Live Updates -->
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
+      <h2 class="text-2xl font-semibold mb-6 text-center text-gray-800 dark:text-gray-100">Live Balance Updates</h2>
+      <div id="updates" class="space-y-4 max-h-96 overflow-y-auto">
+        <p class="text-gray-500 dark:text-gray-400 text-center italic">Waiting for card scans or top-ups...</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-gray-100 dark:bg-gray-900 py-6 text-center text-sm text-gray-600 dark:text-gray-400">
+    RFID Top-Up System • Team batidao "Make embedded fun" • 2026
+  </footer>
+
+  <!-- Scripts -->
+  <script>
+    const BACKEND_URL = 'http://157.173.101.159:8247'; // change to VPS URL if deployed
+    const WS_URL = BACKEND_URL.replace(/^http/, 'ws');
+
+    const updatesDiv = document.getElementById('updates');
+    const currentBalanceEl = document.getElementById('currentBalance');
+    const currentUidEl = document.getElementById('currentUid');
+    const lastUpdateEl = document.getElementById('lastUpdate');
+    const feedback = document.getElementById('feedback');
+
+    // WebSocket
+    const ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      updatesDiv.innerHTML = '<p class="text-green-600 dark:text-green-400 text-center">Connected to real-time updates</p>';
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.message && msg.message.includes('Connected')) return;
+
+        const topic = msg.topic?.split('/').pop() || '';
+        const data = msg.data || {};
+
+        let displayText = '';
+        let balanceValue = null;
+        let uidValue = data.uid || 'unknown';
+
+        if (topic.includes('status') || topic.includes('balance')) {
+          balanceValue = data.balance;
+          displayText = `UID: <strong>${uidValue}</strong> | Balance: <strong>${balanceValue.toLocaleString()} RWF</strong>`;
+        } else {
+          displayText = `Unknown update: ${JSON.stringify(data)}`;
+        }
+
+        // Update big balance card
+        if (balanceValue !== null) {
+          currentBalanceEl.textContent = `${balanceValue.toLocaleString()} RWF`;
+          currentUidEl.textContent = `UID: ${uidValue}`;
+          lastUpdateEl.textContent = new Date().toLocaleTimeString();
+
+          // Highlight change
+          currentBalanceEl.classList.add('text-green-500');
+          setTimeout(() => currentBalanceEl.classList.remove('text-green-500'), 1500);
+        }
+
+        // Add to updates
+        const entry = document.createElement('div');
+        entry.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow-sm border-l-4 border-indigo-500 animate-fade-in';
+        entry.innerHTML = `<p class="font-medium">${displayText}</p><p class="text-xs text-gray-500 dark:text-gray-400 mt-1">${new Date().toLocaleTimeString()}</p>`;
+        updatesDiv.prepend(entry);
+
+      } catch (e) {
+        console.error('WS parse error:', e, 'Raw:', event.data);
+      }
+    };
+
+    ws.onclose = () => {
+      updatesDiv.innerHTML += '<p class="text-red-600 dark:text-red-400 text-center mt-4">Connection lost — reconnecting...</p>';
+    };
+
+    // Top-up form
+    document.getElementById('topupForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const uid = document.getElementById('uid').value.trim().toUpperCase();
+      const amount = parseInt(document.getElementById('amount').value);
+      if (!uid || isNaN(amount) || amount <= 0) return showFeedback('Enter valid UID and amount', 'error');
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/topup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid, amount })
+        });
+        const result = await res.json();
+        if (res.ok) showFeedback(`Top-up sent: ${amount} RWF`, 'success');
+        else showFeedback(result.error || 'Failed to top-up', 'error');
+        document.getElementById('topupForm').reset();
+      } catch (err) {
+        showFeedback('Connection error: ' + err.message, 'error');
+      }
+    });
+
+    function showFeedback(text, type = 'success') {
+      feedback.textContent = text;
+      feedback.className = `p-4 rounded-lg text-center font-medium ${
+        type==='success' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                         : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`;
+      feedback.classList.remove('hidden');
+      setTimeout(() => feedback.classList.add('hidden'), 5000);
+    }
+  </script>
+</body>
+</html>
